@@ -1,0 +1,120 @@
+- hosts: my.mvc-local.dev
+  gather_facts: yes
+  environment:
+    DEBIAN_FRONTEND: noninteractive  # Set the non-interactive mode
+  vars:
+    ansible_ssh_common_args: "-o StrictHostKeyChecking=no"
+
+  tasks:
+    - name: Manually Add PHP Repository
+      become: yes
+      apt_repository:
+        repo: ppa:ondrej/php
+
+    - name: Update package cache
+      become: yes
+      apt:
+        update_cache: yes
+
+    ###########################
+    # PHP
+    - name: PHP 8.2 | Install
+      become: yes
+      apt:
+        name:
+          - php8.2
+          - libapache2-mod-php8.2  # Install Apache module for PHP
+
+    # - name: PHP 8.2 fpm | Install
+    #   become: yes
+    #   apt:
+    #     name:
+    #       - php8.2-fpm
+
+    - name: PHP 8.2 rest of the stuff | Install
+      become: yes
+      apt:
+        name:
+          - php8.2-common
+          - php8.2-cli
+          - php8.2-curl
+          - php8.2-mysqli
+
+    ###########################
+    # APACHE
+    - name: Apache | Install
+      become: yes
+      apt:
+        pkg: "{{ item }}"
+        state: latest
+      with_items:
+        - apache2
+        - libapache2-mod-php8.2  # Install Apache module for PHP
+        - apache2-mpm-event
+
+    # - name: Enable mpm_prefork
+    #   become: yes
+    #   command: a2enmod mpm_prefork
+    #   notify: Restart Apache
+
+    ###########################
+    # APPLICATION
+    - name: Create application directory symlink as document root of apache
+      file:
+        src: "/vagrant/application/"  # Replace with the path to the source directory
+        dest: "/var/www/html/my-mvc-local"  # Replace with the path where you want to create the symlink
+        state: link
+        force: yes  # Optional parameter to replace an existing symlink if present
+      become: yes
+    
+    # - name: Change user and group ownership
+    #   file:
+    #     path: /vagrant/application/
+    #     state: directory
+    #     owner: vagrant
+    #     group: vagrant
+    #   become: yes
+
+    # - name: Create directory /etc/apache2/conf-available
+    #   command: mkdir /etc/apache2/conf-available
+    #   become: yes
+
+    - name: Create symbolic link to mpm_prefork.conf
+      file:
+        src: /var/www/html/my-mvc-local/server/config/mpm_prefork.conf.j2
+        dest: /etc/apache2/conf-available/my_mpm_prefork.conf
+        state: link
+        # force: yes
+      become: yes
+    
+    - name: Create application apache config symlink
+      become: yes
+      file:
+        src: "/vagrant/application/server/config/httpd.conf"  # Replace with the path to the source directory
+        dest: "/etc/apache2/sites-available/my-mvc-local.conf"  # Replace with the path where you want to create the symlink
+        state: link
+        force: yes  # Optional parameter to replace an existing symlink if present
+      notify: Restart Apache
+
+    # - name: Configure Apache with mpm_prefork
+    #   become: yes
+    #   template:
+    #     src: "/var/www/html/my-mvc-local/server/config/mpm_prefork.conf.j2"  # Path to your mpm_prefork.conf.j2 template file
+    #     dest: "/etc/apache2/mods-available/mpm_prefork.conf"
+    #   notify: Restart Apache
+
+    - name: Enable the virtual host
+      command: a2ensite my-mvc-local.conf
+      args:
+        chdir: /etc/apache2/sites-available/
+      notify: Restart Apache
+      become: yes
+
+  ###########################
+  # HANDLERS
+  handlers:
+    - name: Restart Apache
+      service:
+        name: apache2
+        state: restarted
+      become: yes
